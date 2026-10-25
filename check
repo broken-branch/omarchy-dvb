@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Checks this plugin: required files (this script among them), the manifest's
+# structure, Omarchy's own validation and a QML syntax check when they are
+# installed, then the unit tests.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+fail() { echo "check: $*" >&2; exit 1; }
+
+for f in manifest.json Panel.qml DvbCommand.qml status.js README.md LICENSE CONTRIBUTING.md SECURITY.md preview.png check; do
+  [[ -f $f ]] || fail "missing $f"
+done
+compgen -G "tests/*.test.js" > /dev/null || fail "no tests/*.test.js"
+
+# Keep these checks structural so manifest edits have one source of truth;
+# Omarchy validates the plugin-specific values when it is installed.
+jq -e '
+  (.schemaVersion | type == "number") and
+  (all(.id, .name, .version, .author, .license, .description; type == "string")) and
+  (.kinds | type == "array") and
+  (.entryPoints.barWidget | type == "string")
+' manifest.json > /dev/null || fail "manifest.json is missing required keys or has incorrect types"
+entry_point=$(jq -r '.entryPoints.barWidget' manifest.json)
+[[ -f $entry_point ]] || fail "bar widget entry point is not a file: $entry_point"
+echo "check: manifest ok"
+
+if command -v omarchy > /dev/null; then
+  omarchy plugin validate . || fail "omarchy plugin validate failed"
+  echo "check: omarchy plugin validate ok"
+else
+  echo "check: omarchy not on PATH; skipping omarchy plugin validate"
+fi
+
+qmllint=$(command -v qmllint || command -v qmllint6 || true)
+[[ -n $qmllint || ! -x /usr/lib/qt6/bin/qmllint ]] || qmllint=/usr/lib/qt6/bin/qmllint
+if [[ -n $qmllint ]]; then
+  # A syntax check only: Omarchy's qs.* modules resolve only inside the
+  # shell, so qmllint cannot check types or imports here and only warns.
+  for f in *.qml; do
+    out=$("$qmllint" "$f" 2>&1) || { echo "$out" >&2; fail "qmllint failed on $f"; }
+  done
+  echo "check: qmllint syntax ok"
+else
+  echo "check: qmllint not installed; skipping QML lint"
+fi
+
+node --test tests/*.test.js

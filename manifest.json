@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.broken-branch.dvb",
+  "name": "dvb",
+  "version": "0.1.0",
+  "author": "broken-branch",
+  "license": "MIT",
+  "description": "A bar icon with a count when dvb needs you: a plan to approve, an open question, or a failed or stopped task.",
+  "kinds": ["bar-widget"],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "dvb",
+    "description": "One bar icon that shows only when dvb needs you, with a count badge, and a panel listing what is waiting. Clicks open dvb's cockpit.",
+    "category": "AI",
+    "aliases": ["dvb", "need-you"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 30
+    },
+    "schema": [
+      { "key": "refreshIntervalSec", "type": "integer", "label": "Refresh interval (seconds)", "min": 10, "max": 600, "step": 10, "defaultValue": 30 }
+    ]
+  }
+}
