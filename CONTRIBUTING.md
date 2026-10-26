@@ -10,3 +10,13 @@ as they are.
 
 Run `./check` before you send a change. Report security problems privately, as
 [SECURITY.md](SECURITY.md) describes.
+
+## Check
+
+`./check` checks required files and the manifest's keys and types, runs
+`omarchy plugin validate` when Omarchy is installed, runs `qmllint` as a QML
+syntax check when Qt's tools are installed (Omarchy's own modules only resolve
+inside the shell, so it cannot check types) and runs the unit tests
+(`node --test`). When Quickshell is
+installed, it also tests process completion and recovery offscreen. It needs
+`jq` and Node.js.
