@@ -43,6 +43,12 @@ in the bar, use `omarchy bar move`, for example
 
 The widget installs nothing else and never asks for `sudo`.
 
+## Remove
+
+```sh
+omarchy plugin remove io.github.broken-branch.dvb
+```
+
 ## License
 
 [MIT](LICENSE)
