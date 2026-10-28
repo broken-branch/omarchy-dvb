@@ -78,7 +78,7 @@ test("malformed output is not a status", () => {
 test("dvb missing: exit 127 is its own state", () => {
   assert.deepEqual(status.failure(127, "bash: line 1: exec: dvb: not found\n"), {
     state: "missing",
-    message: "dvb not found on PATH; the widget stays hidden"
+    message: "dvb not found on PATH; the widget offers Install dvb"
   })
 })
 
@@ -137,13 +137,60 @@ const question = { kind: "question", id: "q1", project: "p1", title: "Approve pl
 const task1 = { kind: "task", id: "t1", project: "p1", title: "First task" }
 const task2 = { kind: "task", id: "t2", project: "p2", title: "Second task" }
 
-test("dvb found: polls run that path; not found logs once and hides", () => {
+test("dvb found: polls run that path and the widget hides while nothing waits", () => {
   const w = widget()
   assert.equal(w.apply(status.located(w.state, 0, "/usr/bin/dvb\n")).path, "/usr/bin/dvb")
   assert.deepEqual(w.logged, [])
-  for (let i = 0; i < 3; i++) assert.equal(w.apply(status.located(w.state, 1, "")).path, "")
-  assert.deepEqual(w.logged, ["dvb not found on PATH; the widget stays hidden"])
+  assert.equal(w.state.notInstalled, false)
   assert.equal(w.visible, false)
+})
+
+test("dvb not installed: the icon shows without a count, logs once, and the panel stays open", () => {
+  const w = widget()
+  assert.equal(w.apply(status.located(w.state, 1, "")).path, "")
+  assert.equal(w.state.notInstalled, true)
+  assert.equal(w.state.needsYou, 0)
+  assert.equal(w.visible, true)
+  w.opened = true
+  for (let i = 0; i < 3; i++) {
+    assert.equal(w.apply(status.located(w.state, 1, "")).path, "")
+    assert.equal(w.opened, true)
+    assert.equal(w.visible, true)
+  }
+  assert.deepEqual(w.logged, ["dvb not found on PATH; the widget offers Install dvb"])
+  assert.deepEqual(status.activateArgv(w.state.items, null, true), status.installArgv())
+  assert.deepEqual(status.activateArgv(w.state.items, { cockpit: true }, true), status.installArgv())
+})
+
+test("dvb installed later: the panel closes and the widget behaves as before", () => {
+  const w = widget()
+  w.count(1)
+  w.refresh([question])
+  w.apply(status.located(w.state, 0, ""))
+  assert.equal(w.state.notInstalled, true)
+  assert.deepEqual(w.state.items, [])
+  w.opened = true
+  assert.equal(w.apply(status.located(w.state, 0, "/usr/local/bin/dvb\n")).path, "/usr/local/bin/dvb")
+  assert.equal(w.opened, false)
+  assert.equal(w.state.notInstalled, false)
+  assert.equal(w.visible, false)
+  w.count(1)
+  w.refresh([question])
+  assert.equal(w.visible, true)
+  assert.deepEqual(status.activateArgv(w.state.items, null, w.state.notInstalled), ["dvb", "app", "--route", "/decision/q1"])
+})
+
+test("Install dvb opens Omarchy's terminal running dvb's documented installer", () => {
+  assert.deepEqual(status.INSTALL_STEPS, [
+    "curl -fsSL https://github.com/broken-branch/dvb/releases/latest/download/install.sh -o install.sh",
+    "sudo sh install.sh --engine --cockpit"
+  ])
+  assert.deepEqual(status.installArgv(), [
+    "omarchy-launch-floating-terminal-with-presentation",
+    '(cd "$(mktemp -d)" && set -x && ' +
+      "curl -fsSL https://github.com/broken-branch/dvb/releases/latest/download/install.sh -o install.sh && " +
+      "sudo sh install.sh --engine --cockpit)"
+  ])
 })
 
 test("a failed list read closes a panel opened before any successful count", () => {
@@ -231,7 +278,7 @@ test("a vanished binary hides stale status and asks to discard its cached path",
   assert.equal(w.visible, false)
   assert.equal(w.opened, false)
   assert.equal(w.fail(127, "").missing, true)
-  assert.deepEqual(w.logged, ["dvb not found on PATH; the widget stays hidden"])
+  assert.deepEqual(w.logged, ["dvb not found on PATH; the widget offers Install dvb"])
   w.apply(status.located(w.state, 0, "/new/bin/dvb\n"))
   w.count(1)
   w.refresh([question])

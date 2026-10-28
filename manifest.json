@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "dvb",
-    "description": "One bar icon that shows only when dvb needs you, with a count badge, and a panel listing what is waiting. Clicks open dvb's cockpit.",
+    "description": "One bar icon with a count badge when dvb needs you, and a panel listing what is waiting. If dvb isn't installed, the icon offers to install it. Clicks open dvb's cockpit.",
     "category": "AI",
     "aliases": ["dvb", "need-you"],
     "allowMultiple": false,

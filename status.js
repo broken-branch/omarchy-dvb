@@ -17,6 +17,22 @@ function parseJson(text) {
   }
 }
 
+// dvb's documented install, as its README gives it: the panel lists these
+// steps, and Install dvb runs them in a new temporary directory. The subshell
+// traces each command before it runs, so the terminal shows exactly what runs;
+// sudo asks for the user's password there.
+var INSTALL_STEPS = [
+  "curl -fsSL https://github.com/broken-branch/dvb/releases/latest/download/install.sh -o install.sh",
+  "sudo sh install.sh --engine --cockpit"
+]
+var INSTALL_COMMAND = '(cd "$(mktemp -d)" && set -x && ' + INSTALL_STEPS.join(" && ") + ")"
+
+// "Install dvb" opens Omarchy's floating terminal, the one its own update and
+// install actions use, running INSTALL_COMMAND.
+function installArgv() {
+  return ["omarchy-launch-floating-terminal-with-presentation", INSTALL_COMMAND]
+}
+
 // The exit code Panel.qml reports for a call its watchdog stopped.
 var TIMED_OUT = -1
 // How long a `dvb` call may run before Panel.qml stops it.
@@ -109,7 +125,7 @@ function badgeText(n) {
 // A failed or unusable read: which state it is and the line to log.
 // 127 also represents a direct call whose executable could not be started.
 function failure(exitCode, stderr) {
-  if (exitCode === 127) return { state: "missing", message: "dvb not found on PATH; the widget stays hidden" }
+  if (exitCode === 127) return { state: "missing", message: "dvb not found on PATH; the widget offers Install dvb" }
   if (exitCode === TIMED_OUT) return { state: "timeout", message: "dvb status did not finish in " + WATCHDOG_SEC + " s; stopped it" }
   var lines = String(stderr || "").split("\n")
   var first = ""
@@ -129,12 +145,14 @@ function shouldLog(lastLogged, state) {
 //   items        the last good list from `dvb status --json`
 //   listRead     the list has succeeded since the last failure
 //   lastLogged   the failure state last logged, "" after a good list read
+//   notInstalled the login shell found no `dvb`: the icon shows, without a
+//                badge, and the panel offers Install dvb
 function initialState() {
-  return { needsYou: 0, items: [], listRead: false, lastLogged: "" }
+  return { needsYou: 0, items: [], listRead: false, lastLogged: "", notInstalled: false }
 }
 
 function visible(state) {
-  return state.needsYou > 0 && state.listRead
+  return state.notInstalled || (state.needsYou > 0 && state.listRead)
 }
 
 function update(state, changes) {
@@ -156,11 +174,20 @@ function statusFailed(state, exitCode, stderr) {
   }
 }
 
-// The login shell's `command -v dvb` finished: the path to run, or "".
+// The login shell's `command -v dvb` finished: the path to run, or "". The
+// panel closes when the widget changes between not installed and installed,
+// and stays open while each refresh still finds no `dvb`.
 function located(state, exitCode, output) {
   var path = exitCode === 0 ? parseWhich(output) : ""
-  if (path === "") return update(statusFailed(state, 127, ""), { path: "" })
-  return { state: state, log: [], close: false, path: path }
+  if (path === "") {
+    var failed = statusFailed(state, 127, "")
+    return update(failed, {
+      state: update(failed.state, { items: [], notInstalled: true }),
+      close: !state.notInstalled,
+      path: ""
+    })
+  }
+  return { state: update(state, { notInstalled: false }), log: [], close: state.notInstalled, path: path }
 }
 
 // `dvb status --bar` finished. `readList` asks for the list when something
@@ -204,8 +231,9 @@ function moveCursor(items, cursor, dy) {
 
 // The argv Enter runs, or null when the selected item has gone: Enter then
 // does nothing until the user picks another row. With no cursor it opens the
-// first row.
-function activateArgv(items, cursor) {
+// first row. While dvb is not installed, Enter runs Install dvb.
+function activateArgv(items, cursor, notInstalled) {
+  if (notInstalled) return installArgv()
   var index = cursor ? cursorIndex(items, cursor) : 0
   if (index < 0) return null
   return index < items.length ? appArgv(items[index]) : ["dvb", "app"]
@@ -220,6 +248,9 @@ if (typeof module !== "undefined") {
     kindLabel: kindLabel,
     route: route,
     appArgv: appArgv,
+    INSTALL_STEPS: INSTALL_STEPS,
+    INSTALL_COMMAND: INSTALL_COMMAND,
+    installArgv: installArgv,
     badgeText: badgeText,
     failure: failure,
     shouldLog: shouldLog,

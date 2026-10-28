@@ -32,13 +32,15 @@ Panel {
   property string lastLogged: ""
   property string updatedAt: ""
   property bool listAgain: false
+  property bool notInstalled: false
 
   property var cursor: null
   readonly property int cursorIndex: Status.cursorIndex(items, cursor)
 
   function state() {
     return {
-      needsYou: needsYou, items: items, listRead: listRead, lastLogged: lastLogged
+      needsYou: needsYou, items: items, listRead: listRead, lastLogged: lastLogged,
+      notInstalled: notInstalled
     }
   }
 
@@ -51,6 +53,7 @@ Panel {
     listRead = s.listRead
     lastLogged = s.lastLogged
     needsYou = s.needsYou
+    notInstalled = s.notInstalled
     for (var i = 0; i < result.log.length; i++) console.warn("dvb", result.log[i])
     if (result.close && opened) close()
   }
@@ -75,6 +78,11 @@ Panel {
     Commons.Util.execArgv(["dvb", "app"])
   }
 
+  function installDvb() {
+    root.close()
+    Commons.Util.execArgv(Status.installArgv())
+  }
+
   function selectCursor(index) {
     cursor = Status.cursorAt(items, index)
   }
@@ -85,7 +93,7 @@ Panel {
   }
 
   function activateCursor() {
-    var argv = Status.activateArgv(items, cursor)
+    var argv = Status.activateArgv(items, cursor, notInstalled)
     if (argv === null) return
     root.close()
     Commons.Util.execArgv(argv)
@@ -93,7 +101,7 @@ Panel {
 
   function keepCursorInView() {
     if (cursorIndex < 0) return
-    var target = cursorIndex === items.length ? cockpitButton : rows.itemAt(cursorIndex)
+    var target = cursorIndex === items.length ? actionButton : rows.itemAt(cursorIndex)
     if (!target || !panelFlick) return
     var y = target.mapToItem(column, 0, 0).y
     if (y < panelFlick.contentY) panelFlick.contentY = y
@@ -101,8 +109,8 @@ Panel {
       panelFlick.contentY = y + target.height - panelFlick.height
   }
 
-  // No bar space unless something waits and the list has been read since the
-  // last failure.
+  // No bar space unless dvb is not installed, or something waits and the list
+  // has been read since the last failure.
   visible: Status.visible(state())
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -124,7 +132,7 @@ Panel {
   }
 
   // Finds dvbPath. While dvb is missing, each refresh asks again, so the
-  // widget comes back once dvb is installed.
+  // widget behaves as installed once dvb is on PATH.
   Process {
     id: locate
     running: false
@@ -177,15 +185,16 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    tooltipText: "dvb: " + root.needsYou + " need you"
+    tooltipText: root.notInstalled ? "dvb is not installed" : "dvb: " + root.needsYou + " need you"
     onPressed: function(buttonCode) {
-      if (buttonCode === Qt.RightButton) Commons.Util.execArgv(["dvb", "app"])
+      if (buttonCode === Qt.RightButton && !root.notInstalled) Commons.Util.execArgv(["dvb", "app"])
       else if (buttonCode === Qt.MiddleButton) root.refreshNow()
       else root.toggle()
     }
 
     // The glyph stays in the bar's foreground, as the badge carries the
-    // alert; the count badge sits on the glyph canvas's top-right corner.
+    // alert; the count badge sits on the glyph canvas's top-right corner and
+    // is left out while dvb is not installed.
     iconComponent: Component {
       Item {
         OpticalGlyph {
@@ -198,6 +207,7 @@ Panel {
 
         BorderSurface {
           id: badge
+          visible: !root.notInstalled
           // Overlaps the canvas by a third of its width and height.
           anchors.left: parent.right
           anchors.leftMargin: -width / 3
@@ -263,7 +273,7 @@ Panel {
           PanelHero {
             width: parent.width
             title: "dvb"
-            meta: root.needsYou + " need you"
+            meta: root.notInstalled ? "Not installed" : root.needsYou + " need you"
             foreground: root.foreground
             fontFamily: root.fontFamily
 
@@ -280,7 +290,30 @@ Panel {
 
           PanelSeparator { foreground: root.foreground }
 
+          Text {
+            visible: root.notInstalled
+            width: parent.width
+            textFormat: Text.PlainText
+            text: "dvb is not on your PATH. Install dvb opens a terminal that downloads dvb's installer and runs it with sudo, which asks for your password:"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Commons.Style.font.bodySmall
+            wrapMode: Text.Wrap
+          }
+
+          Text {
+            visible: root.notInstalled
+            width: parent.width
+            textFormat: Text.PlainText
+            text: Status.INSTALL_STEPS.join("\n")
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Commons.Style.font.caption
+            wrapMode: Text.WrapAnywhere
+          }
+
           Column {
+            visible: !root.notInstalled
             width: parent.width
             spacing: Commons.Style.spacing.xxs
 
@@ -319,23 +352,24 @@ Panel {
 
           PanelSeparator { foreground: root.foreground }
 
+          // "Open cockpit", or "Install dvb" while dvb is not installed.
           Button {
-            id: cockpitButton
+            id: actionButton
             width: parent.width
             bordered: true
-            iconText: "󰏌"
-            text: "Open cockpit"
+            iconText: root.notInstalled ? "󰇚" : "󰏌"
+            text: root.notInstalled ? "Install dvb" : "Open cockpit"
             hasCursor: root.cursorIndex === root.items.length
             foreground: root.foreground
             fontFamily: root.fontFamily
             fontSize: Commons.Style.font.bodySmall
             verticalPadding: Commons.Style.spacing.controlPaddingY
-            onClicked: root.openCockpit()
+            onClicked: root.notInstalled ? root.installDvb() : root.openCockpit()
             onHovered: function(isHovered) { if (isHovered) root.selectCursor(root.items.length) }
           }
 
           Text {
-            visible: root.updatedAt !== ""
+            visible: root.updatedAt !== "" && !root.notInstalled
             width: parent.width
             textFormat: Text.PlainText
             text: "Updated " + root.updatedAt
