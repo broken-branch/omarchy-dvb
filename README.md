@@ -20,6 +20,9 @@ machine the colours and sizes follow your Omarchy theme.*
 - **An "Install dvb" action while dvb is not installed**: the icon shows
   without a badge, and its panel lists the installer's commands and offers
   **Install dvb** (see [Install](#install)).
+- **An "Update dvb" row when `dvb update --check`, run at start and every 6
+  hours, finds a newer release**: the icon shows without changing the count,
+  and the row opens a terminal that runs `dvb update`.
 - **Clicks open dvb's cockpit**: an item opens its page with
   `dvb app --route`, and "Open cockpit" (or a right click on the icon) runs
   `dvb app`. A middle click, or `r` in the panel, refreshes now.

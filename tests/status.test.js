@@ -128,6 +128,7 @@ function widget() {
     failCount(code = 1, err = "engine unreachable") { return w.apply(status.barDone(w.state, code, "", err)) },
     refresh(items) { return w.apply(status.listDone(w.state, 0, JSON.stringify({ needs_you_items: items }), "")) },
     fail(code = 1, err = "engine unreachable") { return w.apply(status.listDone(w.state, code, "", err)) },
+    check(out, code = 0, err = "") { return w.apply(status.updateDone(w.state, code, out, err)) },
     get visible() { return status.visible(w.state) }
   }
   return w
@@ -349,4 +350,139 @@ test("selection distinguishes task and question ids; fresh Enter opens the first
   assert.deepEqual(status.activateArgv([sameId, task1], cursor), ["dvb", "app", "--route", "/task/t1"])
   assert.deepEqual(status.activateArgv([question], null), ["dvb", "app", "--route", "/decision/q1"])
   assert.deepEqual(status.activateArgv([], null), ["dvb", "app"])
+})
+
+const newest = "dvb 0.1.78 is the newest release\n"
+const available = "dvb 0.1.78 is installed; 0.1.79 is available. Install it with: dvb update\n"
+
+test("update check: the newest release, a newer one, or neither of the two lines", () => {
+  assert.equal(status.parseUpdate(newest), "")
+  assert.equal(status.parseUpdate(available), "0.1.79")
+  for (const out of ["", "dvb 0.1.78 is installed\n", "dvb is now 0.1.79 on this box", "dvb 0.1.78 is installed; 0.1.79 is available.", "dvb 0.1.78 is the newest release\nmore", "error: no release"]) {
+    assert.equal(status.parseUpdate(out), null, out)
+  }
+})
+
+test("a newer release shows the icon while nothing needs you; the count stays 0", () => {
+  const w = widget()
+  w.count(0)
+  assert.equal(w.visible, false)
+  w.check(available)
+  assert.equal(w.state.updateTo, "0.1.79")
+  assert.equal(w.state.needsYou, 0)
+  assert.equal(w.visible, true)
+  w.opened = true
+  assert.equal(w.count(0).close, false)
+  assert.equal(w.opened, true)
+  assert.deepEqual(w.logged, [])
+})
+
+test("a newer release does not change the need-you count", () => {
+  const w = widget()
+  w.count(2)
+  w.refresh([question, task1])
+  w.check(available)
+  assert.equal(w.state.needsYou, 2)
+  assert.deepEqual(w.state.items.map((i) => i.id), ["q1", "t1"])
+  assert.equal(w.visible, true)
+})
+
+for (const item of [question, task1]) {
+  test(`a zero count clears the resolved ${item.kind} while an update keeps the panel open`, () => {
+    const w = widget()
+    w.count(1)
+    w.refresh([item])
+    w.check(available)
+    w.opened = true
+    const cursor = status.cursorAt(w.state.items, 0, true)
+
+    const result = w.count(0)
+    assert.deepEqual(w.state.items, [])
+    assert.equal(w.state.listRead, true)
+    assert.equal(w.state.needsYou, 0)
+    assert.equal(result.readList, false)
+    assert.equal(w.opened, true)
+    assert.equal(w.visible, true)
+    assert.equal(w.state.updateTo, "0.1.79")
+    assert.equal(status.activateArgv(w.state.items, cursor, false, true), null)
+    assert.deepEqual(status.activateArgv(w.state.items, null, false, true), ["dvb", "app"])
+    assert.deepEqual(w.logged, [])
+  })
+}
+
+test("the newest release offers nothing and closes a panel the offer alone kept open", () => {
+  const w = widget()
+  w.count(0)
+  w.check(available)
+  w.opened = true
+  w.check(newest)
+  assert.equal(w.state.updateTo, "")
+  assert.equal(w.visible, false)
+  assert.equal(w.opened, false)
+})
+
+for (const [code, out, err, line] of [
+  [1, "", "error: the engine is not reachable\n", "dvb update --check failed: error: the engine is not reachable"],
+  [0, "something else\n", "", "dvb update --check failed: unexpected output"],
+  [status.TIMED_OUT, "", "", "dvb update --check did not finish in 15 s; stopped it"]
+]) {
+  test(`a failed update check (${code}) offers nothing new and logs once until a check succeeds`, () => {
+    const w = widget()
+    w.count(0)
+    w.check(out, code, err)
+    w.check(out, code, err)
+    assert.equal(w.state.updateTo, "")
+    assert.equal(w.visible, false)
+    assert.deepEqual(w.logged, [line])
+    w.check(available)
+    assert.equal(w.visible, true)
+    w.check(out, code, err)
+    assert.equal(w.visible, false)
+    assert.deepEqual(w.logged, [line, line])
+  })
+}
+
+test("an offered update hides while status reads fail and shows again after a count of 0", () => {
+  const w = widget()
+  w.count(0)
+  w.check(available)
+  w.failCount()
+  assert.equal(w.visible, false)
+  w.count(0)
+  assert.equal(w.visible, true)
+  assert.equal(w.state.listRead, true)
+  assert.deepEqual(w.logged, ["dvb status failed: engine unreachable"])
+})
+
+test("dvb not installed drops an offered update", () => {
+  const w = widget()
+  w.check(available)
+  w.apply(status.located(w.state, 1, ""))
+  assert.equal(w.state.updateTo, "")
+})
+
+test("Update dvb opens Omarchy's terminal running dvb update, shown before it runs", () => {
+  assert.deepEqual(status.updateArgv(), ["omarchy-launch-floating-terminal-with-presentation", "(set -x && dvb update)"])
+})
+
+test("the cursor runs over the rows, Update dvb, then Open cockpit", () => {
+  const items = [question, task1]
+  let cursor = status.moveCursor(items, null, 1, true)
+  for (let i = 0; i < 2; i++) cursor = status.moveCursor(items, cursor, 1, true)
+  assert.deepEqual(cursor, { update: true })
+  assert.equal(status.cursorIndex(items, cursor, true), 2)
+  assert.deepEqual(status.activateArgv(items, cursor, false, true), status.updateArgv())
+  cursor = status.moveCursor(items, cursor, 1, true)
+  assert.deepEqual(cursor, { cockpit: true })
+  assert.equal(status.cursorIndex(items, cursor, true), 3)
+  assert.deepEqual(status.moveCursor(items, cursor, 1, true), { cockpit: true })
+  assert.deepEqual(status.moveCursor([], null, -1, true), { cockpit: true })
+  assert.deepEqual(status.cursorAt([], 0, true), { update: true })
+})
+
+test("Enter never starts an update without the cursor on Update dvb, nor once the offer has gone", () => {
+  assert.deepEqual(status.activateArgv([], null, false, true), ["dvb", "app"])
+  assert.equal(status.activateArgv([], { update: true }, false, false), null)
+  assert.equal(status.cursorIndex([], { update: true }, false), -1)
+  assert.equal(status.cursorIndex([task1], { cockpit: true }, false), 1)
 })

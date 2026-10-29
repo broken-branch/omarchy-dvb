@@ -33,14 +33,18 @@ Panel {
   property string updatedAt: ""
   property bool listAgain: false
   property bool notInstalled: false
+  property string updateTo: ""
+  property string updateLogged: ""
+  readonly property bool updateOffered: updateTo !== ""
 
   property var cursor: null
-  readonly property int cursorIndex: Status.cursorIndex(items, cursor)
+  readonly property int cursorIndex: Status.cursorIndex(items, cursor, updateOffered)
+  readonly property int cockpitIndex: items.length + (updateOffered ? 1 : 0)
 
   function state() {
     return {
       needsYou: needsYou, items: items, listRead: listRead, lastLogged: lastLogged,
-      notInstalled: notInstalled
+      notInstalled: notInstalled, updateTo: updateTo, updateLogged: updateLogged
     }
   }
 
@@ -54,6 +58,8 @@ Panel {
     lastLogged = s.lastLogged
     needsYou = s.needsYou
     notInstalled = s.notInstalled
+    updateTo = s.updateTo
+    updateLogged = s.updateLogged
     for (var i = 0; i < result.log.length; i++) console.warn("dvb", result.log[i])
     if (result.close && opened) close()
   }
@@ -83,25 +89,39 @@ Panel {
     Commons.Util.execArgv(Status.installArgv())
   }
 
+  // The offer goes once the update starts, so it does not stay after a
+  // finished update; the next check offers it again if dvb is still behind.
+  function updateDvb() {
+    root.close()
+    updateTo = ""
+    Commons.Util.execArgv(Status.updateArgv())
+  }
+
+  function checkUpdate() {
+    updateCheck.run(dvbPath, ["update", "--check"])
+  }
+
   function selectCursor(index) {
-    cursor = Status.cursorAt(items, index)
+    cursor = Status.cursorAt(items, index, updateOffered)
   }
 
   function moveCursor(dy) {
-    cursor = Status.moveCursor(items, cursor, dy)
+    cursor = Status.moveCursor(items, cursor, dy, updateOffered)
     Qt.callLater(keepCursorInView)
   }
 
   function activateCursor() {
-    var argv = Status.activateArgv(items, cursor, notInstalled)
+    var argv = Status.activateArgv(items, cursor, notInstalled, updateOffered)
     if (argv === null) return
+    if (!notInstalled && cursor && cursor.update) return updateDvb()
     root.close()
     Commons.Util.execArgv(argv)
   }
 
   function keepCursorInView() {
     if (cursorIndex < 0) return
-    var target = cursorIndex === items.length ? actionButton : rows.itemAt(cursorIndex)
+    var target = cursorIndex < items.length ? rows.itemAt(cursorIndex)
+      : cursorIndex < cockpitIndex ? updateButton : actionButton
     if (!target || !panelFlick) return
     var y = target.mapToItem(column, 0, 0).y
     if (y < panelFlick.contentY) panelFlick.contentY = y
@@ -109,8 +129,8 @@ Panel {
       panelFlick.contentY = y + target.height - panelFlick.height
   }
 
-  // No bar space unless dvb is not installed, or something waits and the list
-  // has been read since the last failure.
+  // No bar space unless dvb is not installed, something waits and the list
+  // has been read since the last failure, or a newer release is offered.
   visible: Status.visible(state())
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -129,6 +149,16 @@ Panel {
     repeat: true
     triggeredOnStart: true
     onTriggered: root.refreshNow()
+  }
+
+  // `dvb update --check` once dvb is found, then every UPDATE_CHECK_HOURS;
+  // the status refresh never runs it.
+  Timer {
+    interval: Status.UPDATE_CHECK_HOURS * 3600 * 1000
+    running: root.dvbPath !== ""
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.checkUpdate()
   }
 
   // Finds dvbPath. While dvb is missing, each refresh asks again, so the
@@ -171,6 +201,13 @@ Panel {
     }
   }
 
+  DvbCommand {
+    id: updateCheck
+    onDone: function(exitCode, out, err) {
+      root.apply(Status.updateDone(root.state(), exitCode, out, err))
+    }
+  }
+
   IpcHandler {
     target: root.ipcTarget
     function open(): void { root.open() }
@@ -185,7 +222,8 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    tooltipText: root.notInstalled ? "dvb is not installed" : "dvb: " + root.needsYou + " need you"
+    tooltipText: root.notInstalled ? "dvb is not installed"
+      : "dvb: " + root.needsYou + " need you" + (root.updateOffered ? "; dvb " + root.updateTo + " is available" : "")
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton && !root.notInstalled) Commons.Util.execArgv(["dvb", "app"])
       else if (buttonCode === Qt.MiddleButton) root.refreshNow()
@@ -194,7 +232,8 @@ Panel {
 
     // The glyph stays in the bar's foreground, as the badge carries the
     // alert; the count badge sits on the glyph canvas's top-right corner and
-    // is left out while dvb is not installed.
+    // is left out while nothing needs you, as when dvb is not installed or
+    // only an update is offered.
     iconComponent: Component {
       Item {
         OpticalGlyph {
@@ -207,7 +246,7 @@ Panel {
 
         BorderSurface {
           id: badge
-          visible: !root.notInstalled
+          visible: !root.notInstalled && root.needsYou > 0
           // Overlaps the canvas by a third of its width and height.
           anchors.left: parent.right
           anchors.leftMargin: -width / 3
@@ -352,6 +391,46 @@ Panel {
 
           PanelSeparator { foreground: root.foreground }
 
+          Column {
+            visible: root.updateOffered && !root.notInstalled
+            width: parent.width
+            spacing: Commons.Style.spacing.xxs
+
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
+              text: "dvb " + root.updateTo + " is available. Update dvb opens a terminal that runs:"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Commons.Style.font.bodySmall
+              wrapMode: Text.Wrap
+            }
+
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
+              text: "dvb update"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Commons.Style.font.caption
+            }
+
+            Button {
+              id: updateButton
+              width: parent.width
+              bordered: true
+              iconText: "󰚰"
+              text: "Update dvb"
+              hasCursor: root.updateOffered && root.cursorIndex === root.items.length
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Commons.Style.font.bodySmall
+              verticalPadding: Commons.Style.spacing.controlPaddingY
+              onClicked: root.updateDvb()
+              onHovered: function(isHovered) { if (isHovered) root.selectCursor(root.items.length) }
+            }
+          }
+
           // "Open cockpit", or "Install dvb" while dvb is not installed.
           Button {
             id: actionButton
@@ -359,13 +438,13 @@ Panel {
             bordered: true
             iconText: root.notInstalled ? "󰇚" : "󰏌"
             text: root.notInstalled ? "Install dvb" : "Open cockpit"
-            hasCursor: root.cursorIndex === root.items.length
+            hasCursor: root.cursorIndex === root.cockpitIndex
             foreground: root.foreground
             fontFamily: root.fontFamily
             fontSize: Commons.Style.font.bodySmall
             verticalPadding: Commons.Style.spacing.controlPaddingY
             onClicked: root.notInstalled ? root.installDvb() : root.openCockpit()
-            onHovered: function(isHovered) { if (isHovered) root.selectCursor(root.items.length) }
+            onHovered: function(isHovered) { if (isHovered) root.selectCursor(root.cockpitIndex) }
           }
 
           Text {

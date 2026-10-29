@@ -33,6 +33,17 @@ function installArgv() {
   return ["omarchy-launch-floating-terminal-with-presentation", INSTALL_COMMAND]
 }
 
+// "Update dvb" opens the same terminal running `dvb update`, which asks the
+// engine to update; the trace shows the command before it runs.
+var UPDATE_COMMAND = "(set -x && dvb update)"
+
+function updateArgv() {
+  return ["omarchy-launch-floating-terminal-with-presentation", UPDATE_COMMAND]
+}
+
+// How often Panel.qml runs `dvb update --check`, besides once at start.
+var UPDATE_CHECK_HOURS = 6
+
 // The exit code Panel.qml reports for a call its watchdog stopped.
 var TIMED_OUT = -1
 // How long a `dvb` call may run before Panel.qml stops it.
@@ -80,6 +91,18 @@ function parseList(output) {
   return items
 }
 
+// `dvb update --check`: the newer version, "" when the installed one is the
+// newest, or null when the output is neither of the check's two lines.
+var NEWEST = /^dvb \S+ is the newest release$/
+var AVAILABLE = /^dvb \S+ is installed; (\S+) is available\. Install it with: dvb update$/
+
+function parseUpdate(output) {
+  var line = String(output || "").trim()
+  if (NEWEST.test(line)) return ""
+  var available = AVAILABLE.exec(line)
+  return available ? available[1] : null
+}
+
 // The login shell's `command -v dvb` output: the last line that is an
 // absolute path, so anything the profile prints first is skipped.
 function parseWhich(output) {
@@ -122,16 +145,18 @@ function badgeText(n) {
   return n > 9 ? "9+" : String(n)
 }
 
-// A failed or unusable read: which state it is and the line to log.
-// 127 also represents a direct call whose executable could not be started.
-function failure(exitCode, stderr) {
+// A failed or unusable read of `call` ("dvb status" unless given): which state
+// it is and the line to log. 127 also represents a direct call whose
+// executable could not be started.
+function failure(exitCode, stderr, call) {
+  call = call || "dvb status"
   if (exitCode === 127) return { state: "missing", message: "dvb not found on PATH; the widget offers Install dvb" }
-  if (exitCode === TIMED_OUT) return { state: "timeout", message: "dvb status did not finish in " + WATCHDOG_SEC + " s; stopped it" }
+  if (exitCode === TIMED_OUT) return { state: "timeout", message: call + " did not finish in " + WATCHDOG_SEC + " s; stopped it" }
   var lines = String(stderr || "").split("\n")
   var first = ""
   for (var i = 0; i < lines.length && first === ""; i++) first = lines[i].trim()
   if (first === "") first = exitCode === 0 ? "unexpected output" : "exit code " + exitCode
-  return { state: "failed", message: "dvb status failed: " + first }
+  return { state: "failed", message: call + " failed: " + first }
 }
 
 // Each failure state logs once: again only after a success ("") or a change
@@ -144,15 +169,26 @@ function shouldLog(lastLogged, state) {
 //   needsYou     the badge count from `dvb status --bar`
 //   items        the last good list from `dvb status --json`
 //   listRead     the list has succeeded since the last failure
-//   lastLogged   the failure state last logged, "" after a good list read
+//   lastLogged   the failure state last logged, "" after a good list read or
+//                a count of 0
 //   notInstalled the login shell found no `dvb`: the icon shows, without a
 //                badge, and the panel offers Install dvb
+//   updateTo     the newer release the last `dvb update --check` found, or "":
+//                the icon shows and the panel offers Update dvb
+//   updateLogged the update check's failure state last logged, "" after a
+//                good check
 function initialState() {
-  return { needsYou: 0, items: [], listRead: false, lastLogged: "", notInstalled: false }
+  return {
+    needsYou: 0, items: [], listRead: false, lastLogged: "", notInstalled: false,
+    updateTo: "", updateLogged: ""
+  }
 }
 
+// An offered update shows only while the status reads work, as `dvb update`
+// needs the same engine.
 function visible(state) {
-  return state.notInstalled || (state.needsYou > 0 && state.listRead)
+  return state.notInstalled || (state.needsYou > 0 && state.listRead) ||
+    (state.updateTo !== "" && state.lastLogged === "")
 }
 
 function update(state, changes) {
@@ -182,7 +218,7 @@ function located(state, exitCode, output) {
   if (path === "") {
     var failed = statusFailed(state, 127, "")
     return update(failed, {
-      state: update(failed.state, { items: [], notInstalled: true }),
+      state: update(failed.state, { items: [], notInstalled: true, updateTo: "" }),
       close: !state.notInstalled,
       path: ""
     })
@@ -191,11 +227,13 @@ function located(state, exitCode, output) {
 }
 
 // `dvb status --bar` finished. `readList` asks for the list when something
-// waits; `close` closes an open panel when nothing does.
+// waits; `close` closes an open panel when nothing does and no update is
+// offered. A count of 0 is the whole status, so it is a good read.
 function barDone(state, exitCode, out, err) {
   var n = exitCode === 0 ? parseBar(out) : null
   if (n === null) return update(statusFailed(state, exitCode, err), { readList: false })
-  return { state: update(state, { needsYou: n }), log: [], close: n === 0, readList: n > 0 }
+  var next = n === 0 ? update(state, { needsYou: 0, items: [], listRead: true, lastLogged: "" }) : update(state, { needsYou: n })
+  return { state: next, log: [], close: n === 0 && !visible(next), readList: n > 0 }
 }
 
 // `dvb status --json` finished.
@@ -205,38 +243,62 @@ function listDone(state, exitCode, out, err) {
   return { state: update(state, { items: list, listRead: true, lastLogged: "" }), log: [], close: false }
 }
 
-// The keyboard cursor runs over the rows and then "Open cockpit". It is null
-// (hidden), { cockpit: true }, or the { kind, id } of the selected item, so
-// selection follows the item when the list changes.
-function cursorIndex(items, cursor) {
+// `dvb update --check` finished. A failed or unreadable check offers no
+// update and logs once until a check succeeds; the panel closes when the
+// offer was all it showed.
+function updateDone(state, exitCode, out, err) {
+  var to = exitCode === 0 ? parseUpdate(out) : null
+  if (to === null) {
+    var f = failure(exitCode, err, "dvb update --check")
+    var failed = update(state, { updateTo: "", updateLogged: f.state })
+    return {
+      state: failed,
+      log: shouldLog(state.updateLogged, f.state) ? [f.message] : [],
+      close: visible(state) && !visible(failed)
+    }
+  }
+  var next = update(state, { updateTo: to, updateLogged: "" })
+  return { state: next, log: [], close: visible(state) && !visible(next) }
+}
+
+// The keyboard cursor runs over the rows, "Update dvb" while `offered`, and
+// then "Open cockpit". It is null (hidden), { update: true },
+// { cockpit: true }, or the { kind, id } of the selected item, so selection
+// follows the item when the list changes.
+function cursorIndex(items, cursor, offered) {
   if (!cursor) return -1
-  if (cursor.cockpit) return items.length
+  if (cursor.update) return offered ? items.length : -1
+  if (cursor.cockpit) return offered ? items.length + 1 : items.length
   for (var i = 0; i < items.length; i++) {
     if (items[i].kind === cursor.kind && items[i].id === cursor.id) return i
   }
   return -1
 }
 
-function cursorAt(items, index) {
-  return index === items.length ? { cockpit: true } : { kind: items[index].kind, id: items[index].id }
+function cursorAt(items, index, offered) {
+  if (index < items.length) return { kind: items[index].kind, id: items[index].id }
+  return offered && index === items.length ? { update: true } : { cockpit: true }
 }
 
 // Up or Down without wrapping; a hidden cursor shows on the first row (Down)
 // or on "Open cockpit" (Up).
-function moveCursor(items, cursor, dy) {
-  var index = cursorIndex(items, cursor)
-  if (index < 0) return cursorAt(items, dy > 0 ? 0 : items.length)
-  return cursorAt(items, Math.min(items.length, Math.max(0, index + dy)))
+function moveCursor(items, cursor, dy, offered) {
+  var last = offered ? items.length + 1 : items.length
+  var index = cursorIndex(items, cursor, offered)
+  if (index < 0) return cursorAt(items, dy > 0 ? 0 : last, offered)
+  return cursorAt(items, Math.min(last, Math.max(0, index + dy)), offered)
 }
 
-// The argv Enter runs, or null when the selected item has gone: Enter then
-// does nothing until the user picks another row. With no cursor it opens the
-// first row. While dvb is not installed, Enter runs Install dvb.
-function activateArgv(items, cursor, notInstalled) {
+// The argv Enter runs, or null when the selected item or update has gone:
+// Enter then does nothing until the user picks another row. With no cursor it
+// opens the first item, or the cockpit when none waits, never Update dvb.
+// While dvb is not installed, Enter runs Install dvb.
+function activateArgv(items, cursor, notInstalled, offered) {
   if (notInstalled) return installArgv()
-  var index = cursor ? cursorIndex(items, cursor) : 0
+  var index = cursor ? cursorIndex(items, cursor, offered) : 0
   if (index < 0) return null
-  return index < items.length ? appArgv(items[index]) : ["dvb", "app"]
+  if (index < items.length) return appArgv(items[index])
+  return cursor && cursor.update ? updateArgv() : ["dvb", "app"]
 }
 
 if (typeof module !== "undefined") {
@@ -251,6 +313,10 @@ if (typeof module !== "undefined") {
     INSTALL_STEPS: INSTALL_STEPS,
     INSTALL_COMMAND: INSTALL_COMMAND,
     installArgv: installArgv,
+    UPDATE_COMMAND: UPDATE_COMMAND,
+    updateArgv: updateArgv,
+    parseUpdate: parseUpdate,
+    updateDone: updateDone,
     badgeText: badgeText,
     failure: failure,
     shouldLog: shouldLog,
