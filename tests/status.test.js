@@ -181,17 +181,11 @@ test("dvb installed later: the panel closes and the widget behaves as before", (
   assert.deepEqual(status.activateArgv(w.state.items, null, w.state.notInstalled), ["dvb", "app", "--route", "/decision/q1"])
 })
 
-test("Install dvb opens Omarchy's terminal running dvb's documented installer", () => {
-  assert.deepEqual(status.INSTALL_STEPS, [
-    "curl -fsSL https://github.com/broken-branch/dvb/releases/latest/download/install.sh -o install.sh",
-    "sudo sh install.sh --engine --cockpit"
-  ])
-  assert.deepEqual(status.installArgv(), [
-    "omarchy-launch-floating-terminal-with-presentation",
-    '(cd "$(mktemp -d)" && set -x && ' +
-      "curl -fsSL https://github.com/broken-branch/dvb/releases/latest/download/install.sh -o install.sh && " +
-      "sudo sh install.sh --engine --cockpit)"
-  ])
+test("Install dvb opens dvb's install guide and runs nothing else", () => {
+  assert.equal(status.INSTALL_GUIDE_URL, "https://github.com/broken-branch/dvb#quick-start")
+  assert.deepEqual(status.installArgv(), ["xdg-open", "https://github.com/broken-branch/dvb#quick-start"])
+  assert.equal(status.INSTALL_STEPS, undefined)
+  assert.equal(status.INSTALL_COMMAND, undefined)
 })
 
 test("a failed list read closes a panel opened before any successful count", () => {

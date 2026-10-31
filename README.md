@@ -17,9 +17,9 @@ machine the colours and sizes follow your Omarchy theme.*
 - **A panel** (left click) listing each waiting item: the question's subject
   or the task's title, its kind (`QUESTION`, `FAILED` or `STOPPED`) and the
   project. Hover a failed task to read why it failed.
-- **An "Install dvb" action while dvb is not installed**: the icon shows
-  without a badge, and its panel lists the installer's commands and offers
-  **Install dvb** (see [Install](#install)).
+- **An "Install dvb" link while dvb is not installed**: the icon shows
+  without a badge, and its panel offers **Install dvb**, which opens dvb's
+  install guide in your browser (see [Install](#install)).
 - **An "Update dvb" row when `dvb update --check`, run at start and every 6
   hours, finds a newer release**: the icon shows without changing the count,
   and the row opens a terminal that runs `dvb update`.
@@ -45,22 +45,14 @@ in the bar's right section. If you added it without `--enable`, run
 in the bar, use `omarchy bar move`, for example
 `omarchy bar move io.github.broken-branch.dvb --section left`.
 
+dvb itself is installed separately, as its
+[README quick start](https://github.com/broken-branch/dvb#quick-start) describes.
 If `dvb` is not on your `PATH` yet, the bar shows the dvb icon without a
-badge. Click it and choose **Install dvb**: a terminal opens and runs dvb's
-installer as its [README](https://github.com/broken-branch/dvb#readme)
-describes, showing each command before it runs:
+badge; click it and choose **Install dvb** to open that guide in your browser.
+Once `dvb` is on your `PATH`, the widget shows only when dvb needs you.
 
-```sh
-curl -fsSL https://github.com/broken-branch/dvb/releases/latest/download/install.sh -o install.sh
-sudo sh install.sh --engine --cockpit
-```
-
-Continue with the README's next steps from there. Once `dvb` is on your
-`PATH`, the widget shows only when dvb needs you. If you install dvb yourself
-first, the widget never offers Install dvb.
-
-The Install dvb action runs dvb's installer in a terminal, which asks for your
-password through `sudo`; the widget itself runs nothing else with privileges.
+The widget installs nothing and runs nothing with raised privileges. dvb's own
+installer asks for your password when you run it, as its README explains.
 
 ## Remove
 

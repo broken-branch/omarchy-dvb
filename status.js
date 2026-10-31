@@ -17,23 +17,14 @@ function parseJson(text) {
   }
 }
 
-// dvb's documented install, as its README gives it: the panel lists these
-// steps, and Install dvb runs them in a new temporary directory. The subshell
-// traces each command before it runs, so the terminal shows exactly what runs;
-// sudo asks for the user's password there.
-var INSTALL_STEPS = [
-  "curl -fsSL https://github.com/broken-branch/dvb/releases/latest/download/install.sh -o install.sh",
-  "sudo sh install.sh --engine --cockpit"
-]
-var INSTALL_COMMAND = '(cd "$(mktemp -d)" && set -x && ' + INSTALL_STEPS.join(" && ") + ")"
+// Installation stays outside the widget: the user follows dvb's README.
+var INSTALL_GUIDE_URL = "https://github.com/broken-branch/dvb#quick-start"
 
-// "Install dvb" opens Omarchy's floating terminal, the one its own update and
-// install actions use, running INSTALL_COMMAND.
 function installArgv() {
-  return ["omarchy-launch-floating-terminal-with-presentation", INSTALL_COMMAND]
+  return ["xdg-open", INSTALL_GUIDE_URL]
 }
 
-// "Update dvb" opens the same terminal running `dvb update`, which asks the
+// "Update dvb" opens Omarchy's floating terminal running `dvb update`, which asks the
 // engine to update; the trace shows the command before it runs.
 var UPDATE_COMMAND = "(set -x && dvb update)"
 
@@ -292,7 +283,7 @@ function moveCursor(items, cursor, dy, offered) {
 // The argv Enter runs, or null when the selected item or update has gone:
 // Enter then does nothing until the user picks another row. With no cursor it
 // opens the first item, or the cockpit when none waits, never Update dvb.
-// While dvb is not installed, Enter runs Install dvb.
+// While dvb is not installed, Enter opens dvb's install guide.
 function activateArgv(items, cursor, notInstalled, offered) {
   if (notInstalled) return installArgv()
   var index = cursor ? cursorIndex(items, cursor, offered) : 0
@@ -310,8 +301,7 @@ if (typeof module !== "undefined") {
     kindLabel: kindLabel,
     route: route,
     appArgv: appArgv,
-    INSTALL_STEPS: INSTALL_STEPS,
-    INSTALL_COMMAND: INSTALL_COMMAND,
+    INSTALL_GUIDE_URL: INSTALL_GUIDE_URL,
     installArgv: installArgv,
     UPDATE_COMMAND: UPDATE_COMMAND,
     updateArgv: updateArgv,

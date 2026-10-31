@@ -333,22 +333,11 @@ Panel {
             visible: root.notInstalled
             width: parent.width
             textFormat: Text.PlainText
-            text: "dvb is not on your PATH. Install dvb opens a terminal that downloads dvb's installer and runs it with sudo, which asks for your password:"
+            text: "dvb is not on your PATH and is installed separately. Install dvb opens dvb's README quick start in your browser. The widget installs nothing and runs nothing with raised privileges."
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Commons.Style.font.bodySmall
             wrapMode: Text.Wrap
-          }
-
-          Text {
-            visible: root.notInstalled
-            width: parent.width
-            textFormat: Text.PlainText
-            text: Status.INSTALL_STEPS.join("\n")
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Commons.Style.font.caption
-            wrapMode: Text.WrapAnywhere
           }
 
           Column {
